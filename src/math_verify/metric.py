@@ -24,8 +24,6 @@ def math_metric(
         it's possible that the the extracted prediction will be the expression to simplify. Because we do simplifications ourselves, it can thus happen that sympy will correctly simplify the expression,
         thus it will match gold, despite model not doing anything. PRs to fix this are welcome.
 
-    - There is currently no StringExtractionConfig, so if the gold is \boxed{\text{Friday}} and model outputs Friday it will not match, because nothing will be extracted.
-
     Args:
         language: Language
             The language of the samples.
