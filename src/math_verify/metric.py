@@ -1,5 +1,6 @@
 ## Parser definition
 import logging
+from math_verify.errors import TimeoutException
 from math_verify.grader import verify
 from math_verify.parser import ExprExtractionConfig, ExtractionTarget, parse
 from math_verify.utils import timeout
@@ -77,7 +78,7 @@ def math_metric(
             str_preds = get_str_preds_with_timeout(
                 extracted_predictions, extracted_golds
             )
-        except Exception:
+        except TimeoutException:
             logger.warning(
                 "Timeout when adding extracted predictions and golds to specific"
             )
