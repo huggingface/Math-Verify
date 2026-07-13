@@ -20,6 +20,7 @@ classifiers = [
 ]
 keywords = ["verification", "math", "evaluation"]
 dependencies = [
+    "cloudpickle>=3.0.0",
     "latex2sympy2_extended==1.11.0",
 ]
 requires-python = ">=3.10"

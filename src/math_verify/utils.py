@@ -20,13 +20,34 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import functools
 import logging
 import os
+import subprocess
+import sys
+
+import cloudpickle
 
 from math_verify.errors import TimeoutException
 
 TIMEOUT_WARNING_SHOWN = False
 logger = logging.getLogger(__name__)
+
+
+def _terminate_process(process: subprocess.Popen) -> None:
+    """Terminate a timeout worker and its descendants."""
+    if process.poll() is not None:
+        return
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    if process.poll() is None:
+        process.kill()
+    process.wait()
 
 
 def timeout(timeout_seconds: int | None = 10):  # noqa: C901
@@ -38,7 +59,7 @@ def timeout(timeout_seconds: int | None = 10):  # noqa: C901
 
     Notes:
         On Unix systems, uses a signal-based alarm approach which is more efficient as it doesn't require spawning a new process.
-        On Windows systems, uses a multiprocessing-based approach since signal.alarm is not available. This will incur a huge performance penalty.
+        On Windows systems, uses a subprocess since signal.alarm is not available. This will incur a performance penalty.
     """
     if timeout_seconds is None or timeout_seconds <= 0:
 
@@ -55,6 +76,7 @@ def timeout(timeout_seconds: int | None = 10):  # noqa: C901
             def handler(signum, frame):
                 raise TimeoutException("Operation timed out!")
 
+            @functools.wraps(func)
             def wrapper(*args, **kwargs):
                 old_handler = signal.getsignal(signal.SIGALRM)
                 signal.signal(signal.SIGALRM, handler)
@@ -71,37 +93,46 @@ def timeout(timeout_seconds: int | None = 10):  # noqa: C901
         return decorator
 
     else:
-        # Windows approach: use multiprocessing
-        from multiprocessing import Process, Queue
 
         def decorator(func):
+            @functools.wraps(func)
             def wrapper(*args, **kwargs):
-                q = Queue()
+                payload = cloudpickle.dumps((func, args, kwargs))
+                process = subprocess.Popen(
+                    [sys.executable, "-m", "math_verify.timeout_worker"],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=(
+                        getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                        if sys.platform == "win32"
+                        else 0
+                    ),
+                )
 
-                def run_func(q, args, kwargs):
-                    try:
-                        result = func(*args, **kwargs)
-                        q.put((True, result))
-                    except Exception as e:
-                        q.put((False, e))
+                try:
+                    output, _ = process.communicate(payload, timeout=timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    _terminate_process(process)
+                    process.communicate()
+                    raise TimeoutException("Operation timed out!") from None
 
-                p = Process(target=run_func, args=(q, args, kwargs))
-                p.start()
-                p.join(timeout_seconds)
+                if process.returncode:
+                    raise RuntimeError(
+                        f"Timeout worker exited with code {process.returncode}"
+                    )
+                try:
+                    success, value = cloudpickle.loads(output)
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Timeout worker returned an invalid response"
+                    ) from exc
 
-                if p.is_alive():
-                    # Timeout: Terminate the process
-                    p.terminate()
-                    p.join()
-                    raise TimeoutException("Operation timed out!")
-
-                # If we got here, the process completed in time.
-                success, value = q.get()
                 if success:
                     return value
-                else:
-                    # The child raised an exception; re-raise it here
+                if isinstance(value, BaseException):
                     raise value
+                raise RuntimeError("Timeout worker returned an invalid exception")
 
             return wrapper
 
