@@ -25,6 +25,8 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 import cloudpickle
 
@@ -36,9 +38,7 @@ logger = logging.getLogger(__name__)
 
 def _terminate_process(process: subprocess.Popen) -> None:
     """Terminate a timeout worker and its descendants."""
-    if process.poll() is not None:
-        return
-    if sys.platform == "win32":
+    if sys.platform == "win32" and process.poll() is None:
         subprocess.run(
             ["taskkill", "/F", "/T", "/PID", str(process.pid)],
             check=False,
@@ -47,7 +47,7 @@ def _terminate_process(process: subprocess.Popen) -> None:
         )
     if process.poll() is None:
         process.kill()
-    process.wait()
+        process.wait()
 
 
 def timeout(timeout_seconds: int | None = 10):  # noqa: C901
@@ -98,41 +98,51 @@ def timeout(timeout_seconds: int | None = 10):  # noqa: C901
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
                 payload = cloudpickle.dumps((func, args, kwargs))
-                process = subprocess.Popen(
-                    [sys.executable, "-m", "math_verify.timeout_worker"],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    creationflags=(
-                        getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                        if sys.platform == "win32"
-                        else 0
-                    ),
-                )
-
-                try:
-                    output, _ = process.communicate(payload, timeout=timeout_seconds)
-                except subprocess.TimeoutExpired:
-                    _terminate_process(process)
-                    process.communicate()
-                    raise TimeoutException("Operation timed out!") from None
-
-                if process.returncode:
-                    raise RuntimeError(
-                        f"Timeout worker exited with code {process.returncode}"
+                with tempfile.TemporaryDirectory(prefix="math-verify-timeout-") as tmp:
+                    input_path = Path(tmp, "input.bin")
+                    output_path = Path(tmp, "output.bin")
+                    input_path.write_bytes(payload)
+                    process = subprocess.Popen(
+                        [
+                            sys.executable,
+                            "-m",
+                            "math_verify.timeout_worker",
+                            str(input_path),
+                            str(output_path),
+                        ],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=(
+                            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                            if sys.platform == "win32"
+                            else 0
+                        ),
                     )
-                try:
-                    success, value = cloudpickle.loads(output)
-                except Exception as exc:
-                    raise RuntimeError(
-                        "Timeout worker returned an invalid response"
-                    ) from exc
 
-                if success:
-                    return value
-                if isinstance(value, BaseException):
-                    raise value
-                raise RuntimeError("Timeout worker returned an invalid exception")
+                    try:
+                        process.wait(timeout=timeout_seconds)
+                    except subprocess.TimeoutExpired:
+                        raise TimeoutException("Operation timed out!") from None
+                    finally:
+                        _terminate_process(process)
+
+                    if process.returncode:
+                        raise RuntimeError(
+                            f"Timeout worker exited with code {process.returncode}"
+                        )
+                    try:
+                        success, value = cloudpickle.loads(output_path.read_bytes())
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "Timeout worker returned an invalid response"
+                        ) from exc
+
+                    if success:
+                        return value
+                    if isinstance(value, BaseException):
+                        raise value
+                    raise RuntimeError("Timeout worker returned an invalid exception")
 
             return wrapper
 

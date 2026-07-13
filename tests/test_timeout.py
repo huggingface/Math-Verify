@@ -1,5 +1,7 @@
 import multiprocessing
 import os
+import subprocess
+import sys
 import time
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -68,7 +70,11 @@ def test_windows_timeout_supports_local_callables(monkeypatch):
     monkeypatch.setattr(utils, "os", SimpleNamespace(name="nt"))
     parent_pid = os.getpid()
 
-    child_pid, result = timeout(2)(lambda: (os.getpid(), lambda value: value + 1))()
+    def noisy_local_callable():
+        os.write(1, b"worker output must not corrupt the protocol")
+        return os.getpid(), lambda value: value + 1
+
+    child_pid, result = timeout(2)(noisy_local_callable)()
 
     assert child_pid != parent_pid
     assert result(2) == 3
@@ -100,3 +106,27 @@ def test_windows_timeout_propagates_child_timeout(monkeypatch):
 
     with pytest.raises(TimeoutException, match="child timeout"):
         timeout(2)(raise_timeout)()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires native taskkill")
+def test_windows_timeout_terminates_descendants(tmp_path):
+    pid_path = tmp_path / "descendant.pid"
+
+    def spawn_descendant():
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+        )
+        pid_path.write_text(str(child.pid))
+        time.sleep(30)
+
+    with pytest.raises(TimeoutException, match="Operation timed out"):
+        timeout(1)(spawn_descendant)()
+
+    descendant_pid = pid_path.read_text()
+    tasklist = subprocess.run(
+        ["tasklist", "/FI", f"PID eq {descendant_pid}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert descendant_pid not in tasklist.stdout

@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import contextlib
 import sys
+from pathlib import Path
 
 import cloudpickle
 
 
 def main() -> None:
+    input_path = Path(sys.argv[1])
+    output_path = Path(sys.argv[2])
     try:
-        func, args, kwargs = cloudpickle.loads(sys.stdin.buffer.read())
+        func, args, kwargs = cloudpickle.loads(input_path.read_bytes())
         try:
-            with contextlib.redirect_stdout(sys.stderr):
-                response = (True, func(*args, **kwargs))
+            response = (True, func(*args, **kwargs))
         except BaseException as exc:
             response = (False, exc)
     except BaseException as exc:
@@ -25,7 +26,7 @@ def main() -> None:
         payload = cloudpickle.dumps(
             (False, RuntimeError(f"Unable to serialize timeout worker response: {exc}"))
         )
-    sys.stdout.buffer.write(payload)
+    output_path.write_bytes(payload)
 
 
 if __name__ == "__main__":
