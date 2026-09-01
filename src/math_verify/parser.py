@@ -186,10 +186,15 @@ def lazy_expr_regex(
 
     # Mixed numbers such as 4 4/9. This must be matched before the generic
     # expression and number patterns so a failed parse cannot fall back to 4.
+    horizontal_space_re = r"[ \t]"
     mixed_whole_re = r"(?:[1-9]\d{0,2}(?:[ ,]\d{3})+|\d+)"
     mixed_number_re = (
-        rf"(?P<mixed_number>(?P<mixed_sign>-?)(?P<mixed_whole>{mixed_whole_re})"
-        r"\s+(?P<mixed_numerator>\d+)\s*/\s*(?P<mixed_denominator>\d+))"
+        rf"(?P<mixed_number>(?P<mixed_sign>[+-]?)(?P<mixed_whole>{mixed_whole_re})"
+        rf"{horizontal_space_re}+(?P<mixed_numerator>\d+)"
+        rf"{horizontal_space_re}*/{horizontal_space_re}*"
+        r"(?P<mixed_denominator>\d+))"
+        rf"(?P<mixed_percent>{horizontal_space_re}*"
+        r"(?:%|[Pp]ercent|[Pp]ercentage|[Pp]ct))?"
     )
 
     # Expressions such as 1/2
@@ -433,18 +438,26 @@ def extract_expr(match: re.Match) -> tuple[str | sympy.Expr | None, str]:
         (val for name, val in groups.items() if name.startswith("decimal") and val), ""
     )
 
+    is_percentage = bool(groups.get("percent") or groups.get("mixed_percent"))
+
     mixed_number = groups.get("mixed_number", "")
     if mixed_number:
         whole = groups["mixed_whole"].translate(str.maketrans("", "", ", "))
         whole = whole.lstrip("0") or "0"
         numerator = groups["mixed_numerator"].lstrip("0") or "0"
         denominator = groups["mixed_denominator"].lstrip("0") or "0"
+        if int(denominator) == 0 or int(numerator) >= int(denominator):
+            # Returning None would let extraction fall through to a finite
+            # component such as the whole-number prefix.
+            return sympy.nan, mixed_number
+
         normalized_mixed_number = f"{whole}+({numerator}/{denominator})"
         if groups.get("mixed_sign") == "-":
             normalized_mixed_number = f"-({normalized_mixed_number})"
-        return parse_expr_cached(normalized_mixed_number), mixed_number
-
-    is_percentage = True if groups.get("percent", None) else False
+        parsed_mixed_number = parse_expr_cached(normalized_mixed_number)
+        if is_percentage:
+            parsed_mixed_number = convert_to_pct(parsed_mixed_number)
+        return parsed_mixed_number, mixed_number
 
     if integer or decimal:
         # This makes sure we can convert numbers like 0001 to 1. Do note that this can convert 0 to '', so we assume an empty string was 0 and convert it back afterwards.
