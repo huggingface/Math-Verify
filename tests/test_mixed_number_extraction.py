@@ -192,26 +192,36 @@ def test_invalid_mixed_number_has_no_finite_component_equivalence(
 
 
 @pytest.mark.parametrize(
-    ("prediction", "inserted_operation_value"),
+    ("prediction", "inserted_operation_values"),
     [
-        pytest.param("11/10 4/9", "139/90", id="fractional-whole"),
-        pytest.param("11.0 4/9", "103/9", id="decimal-whole"),
-        pytest.param("(11) 4/9", "103/9", id="parenthesized-whole"),
-        pytest.param("11/10\n4/9", "139/90", id="line-separated-fractions"),
+        pytest.param("11/10 4/9", ("139/90", "59/90"), id="fractional-whole"),
+        pytest.param("11.0 4/9", ("103/9", "95/9"), id="decimal-whole"),
+        pytest.param("(11) 4/9", ("103/9", "95/9"), id="parenthesized-whole"),
+        pytest.param(
+            "11/10\n4/9",
+            ("139/90", "59/90"),
+            id="line-separated-fractions",
+        ),
     ],
 )
 def test_non_mixed_syntax_does_not_gain_an_implicit_operation(
-    prediction, inserted_operation_value
+    prediction, inserted_operation_values
 ):
     # Given
-    incorrectly_combined = parse(inserted_operation_value, EXPR_EXTRACTION)
+    incorrectly_combined_values = [
+        parse(value, EXPR_EXTRACTION) for value in inserted_operation_values
+    ]
+    expected_equivalences = [False] * len(incorrectly_combined_values)
 
     # When
     parsed = parse(prediction, EXPR_EXTRACTION)
-    equivalent = verify(incorrectly_combined, parsed)
+    equivalences = [
+        verify(incorrectly_combined, parsed)
+        for incorrectly_combined in incorrectly_combined_values
+    ]
 
     # Then
-    assert equivalent is False
+    assert equivalences == expected_equivalences
 
 
 @pytest.mark.parametrize(
