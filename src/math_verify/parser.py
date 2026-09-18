@@ -594,6 +594,8 @@ def extract_target_from_pred(
     """
     extracted_predictions = []
     fallbacks = []
+    # A failed formula must not later supply an isolated number from inside it.
+    failed_latex_spans = []
 
     # Get all patterns and sort by priority
     all_patterns = [
@@ -623,7 +625,28 @@ def extract_target_from_pred(
 
         # Try to extract from each match, starting from rightmost
         for match, _, _, target_type in matches_with_pos:
+            if failed_latex_spans and isinstance(target_type, ExprExtractionConfig):
+                value_spans = [
+                    match.span(name)
+                    for name, value in match.groupdict().items()
+                    if value
+                    and (name == "expr" or name.startswith(("integer", "decimal")))
+                ]
+                if any(
+                    start < hi and end > lo
+                    for start, end in value_spans
+                    for lo, hi in failed_latex_spans
+                ):
+                    continue
             extracted_match, str_fallback = extract_match(match, target_type)
+            if extracted_match is None and isinstance(
+                target_type, LatexExtractionConfig
+            ):
+                failed_latex_spans.extend(
+                    match.span(name)
+                    for name, value in match.groupdict().items()
+                    if value and name.startswith("first_latex")
+                )
 
             match_found = True
             if str_fallback:
