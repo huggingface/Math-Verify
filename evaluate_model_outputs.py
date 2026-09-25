@@ -71,6 +71,8 @@ def process_answers(df: pd.DataFrame, gold_is_latex: bool) -> pd.DataFrame:
         extracted_answers = None
         gold_answers = None
         grade = 0
+        # Count every row: rows that raise below are recorded as incorrect.
+        total_count += 1
         try:
             # Use the verification function
             grade, extracted_answers = verify_func([row['gold']], [row['answer']])
@@ -82,7 +84,6 @@ def process_answers(df: pd.DataFrame, gold_is_latex: bool) -> pd.DataFrame:
                 gold_answers = extracted_answers[0]
                 extracted_answers = extracted_answers[1]
 
-            total_count += 1
             if grade == 1:
                 correct_count += 1
             
