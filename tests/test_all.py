@@ -964,3 +964,27 @@ def test_sqrt_precision(gold, pred, expected):
 def test_symbols(gold, pred, expected):
     assert compare_strings(gold, pred, match_types=["latex", "expr"], precision=5) == expected
 
+
+# Sentence punctuation written inside the math delimiters
+@pytest.mark.parametrize(
+    "gold, pred, match_types, expected",
+    [
+        (r"$\frac{1}{3}$", r"$\frac{1}{3}.$", ["latex", "expr"], 1),
+        (r"$\frac{1}{3}$", r"The answer is $\frac{1}{3}.$", ["latex", "expr"], 1),
+        (r"$\frac{1}{3}$", r"$$\frac{1}{3}.$$", ["latex", "expr"], 1),
+        (r"$\frac{1}{3}$", r"\[\frac{1}{3}.\]", ["latex", "expr"], 1),
+        (r"$\frac{1}{3}$", r"$\frac{1}{3},$", ["latex", "expr"], 1),
+        (r"$\frac{1}{3}$", r"$\frac{1}{3} .$", ["latex", "expr"], 1),
+        (r"$\sqrt{2}$", r"$\sqrt{2}.$", ["latex", "expr"], 1),
+        (r"$(1,2)$", r"$(1,2).$", ["latex", "expr"], 1),
+        (r"$5$", r"$5 \text{ cm}.$", ["latex"], 1),
+        (r"$42$", r"$42.$", ["latex"], 1),
+        # The number fallback must not read "$2" out of "$2^{10}.$"
+        (r"$2$", r"$2^{10}.$", ["latex", "expr"], 0),
+        (r"$1$", r"The answer is $1/3.$", ["latex", "expr"], 0),
+        # An ellipsis is not sentence punctuation
+        (r"$1, 2, 3$", r"$1, 2, 3, ...$", ["latex", "expr"], 0),
+    ],
+)
+def test_trailing_punctuation(gold, pred, match_types, expected):
+    assert compare_strings(gold, pred, match_types=match_types) == expected
