@@ -450,6 +450,10 @@ def extract_expr(match: re.Match) -> tuple[str | sympy.Expr | None, str]:
 
 equation_split_regex = re.compile(r"(?<!\\|\<|\!|\>)=")
 
+# Sentence punctuation written inside the math delimiters, e.g. "$\frac{1}{3}.$".
+# Escaped characters (\, \; \.) and ellipses (...) are kept.
+trailing_punctuation_regex = re.compile(r"(?<![\\.])[.,;]\s*$")
+
 
 def get_last_eq(latex: str):
     # This is to ensure that a=1,b=2 is not splitted
@@ -508,7 +512,7 @@ def extract_latex(
             config = replace(config, boxed="last")  # Use replace to modify single field
 
         normalized_latex = normalize_latex(
-            latex,
+            trailing_punctuation_regex.sub("", latex),
             config=config,
         )
         latex_strs.append(normalized_latex)
