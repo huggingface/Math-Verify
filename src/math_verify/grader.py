@@ -844,8 +844,15 @@ def verify(
             gold = gold.strip()
             target = target.strip()
 
-            # Ensure it's both not empty and equal
-            return len(gold) > 0 and len(target) > 0 and gold == target
+            # Ensure it's both not empty and equal. Internal whitespace is
+            # ignored: the same fallback string can be extracted with or
+            # without inner spaces depending on the source (e.g. "28 \%"
+            # from "$28 \%$" vs "28\%" from "\boxed{28\%}").
+            return (
+                len(gold) > 0
+                and len(target) > 0
+                and "".join(gold.split()) == "".join(target.split())
+            )
 
         return False
 
