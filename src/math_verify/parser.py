@@ -181,7 +181,8 @@ def lazy_expr_regex(
         r"(?P<decimal3>\.\d+)|"
         # Format 4: Integer only (e.g., "123")
         r"(?P<integer3>-?\d+)"
-        r")(?P<percent>\s*(?:%|[Pp]ercent|\s*[Pp]ercentage|\s*[Pp]ct))?"
+        r")(?P<exponent>[eE][-+]?\d+)?"
+        r"(?P<percent>\s*(?:%|[Pp]ercent|\s*[Pp]ercentage|\s*[Pp]ct))?"
     )
 
     # Expressions such as 1/2
@@ -428,7 +429,8 @@ def extract_expr(match: re.Match) -> tuple[str | sympy.Expr | None, str]:
             integer = "0"
 
         decimal = decimal.replace(",", ".")
-        number_str = f"{integer}{decimal}"
+        exponent = groups.get("exponent", "") or ""
+        number_str = f"{integer}{decimal}{exponent}"
         number = Number(number_str)
 
         if is_percentage:
