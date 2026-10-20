@@ -34,26 +34,29 @@ from sympy import (
     Eq,
     Float,
     GreaterThan,
+    Integer,
     Interval,
     LessThan,
     MatrixBase,
     MatrixExpr,
     Mul,
     Number,
-    Integer,
+    Pow,
     Rational,
     Set,
     StrictGreaterThan,
     StrictLessThan,
     Symbol,
     Tuple,
+    UnevaluatedExpr,
     default_sort_key,
+    fraction,
     nan,
     ordered,
     simplify,
     solve,
+    sqrt,
     zoo,
-    UnevaluatedExpr,
 )
 from sympy import FiniteSet as SympyFiniteSet
 from sympy.core.function import UndefinedFunction
@@ -183,6 +186,49 @@ def sympy_numeric_eq(
     return False
 
 
+def _split_sqrt_of_positive_rational_quotient(expr: Basic | MatrixBase):
+    """Rewrite ``sqrt(c/e)`` as ``sqrt(c)/sqrt(e)`` when ``c`` is a positive rational.
+
+    ``sqrt(1/n)`` and ``1/sqrt(n)`` agree for the positive values used in contest
+    answers. SymPy leaves their difference unsimplified while ``n`` is an
+    unrestricted real. Treating every symbol as positive would also mark
+    ``sqrt(x**2)`` equal to ``x``, so only this quotient shape is rewritten.
+    """
+
+    def visit(node):
+        if not isinstance(node, Basic) or isinstance(node, MatrixBase):
+            return node
+        if node.args:
+            rebuilt = node.func(*(visit(arg) for arg in node.args))
+            # Pow(4/n, 1/2) evaluates to 2*sqrt(1/n) on rebuild, which still
+            # contains the radical we meant to split.
+            if rebuilt != node:
+                return visit(rebuilt)
+            node = rebuilt
+        if isinstance(node, Pow) and node.exp == Rational(1, 2):
+            numerator, denominator = fraction(node.base)
+            if (
+                denominator != 1
+                and getattr(numerator, "is_rational", False)
+                and getattr(numerator, "is_positive", False)
+            ):
+                # sqrt(4)/sqrt(n) evaluates back to 2*sqrt(1/n), so visit the
+                # replacement and split that radical too.
+                rewritten = sqrt(numerator) / sqrt(denominator)
+                if rewritten != node:
+                    return visit(rewritten)
+        return node
+
+    return visit(expr)
+
+
+def _difference_is_zero(a: Basic | MatrixBase, b: Basic | MatrixBase) -> bool:
+    difference = simplify((a - b))  # type: ignore
+    if isinstance(difference, MatrixBase) and difference.is_zero_matrix:
+        return True
+    return isinstance(difference, Basic) and bool(difference.is_zero)
+
+
 def sympy_symbolic_eq(a: Basic | MatrixBase, b: Basic | MatrixBase) -> bool:
     """Compare two sympy expressions symbolically.
 
@@ -194,10 +240,13 @@ def sympy_symbolic_eq(a: Basic | MatrixBase, b: Basic | MatrixBase) -> bool:
         True if expressions are symbolically equal, False otherwise
     """
     try:
-        a_b_diff = simplify((a - b))  # type: ignore
-        if isinstance(a_b_diff, MatrixBase) and a_b_diff.is_zero_matrix:
+        if _difference_is_zero(a, b):
             return True
-        elif isinstance(a_b_diff, Basic) and a_b_diff.is_zero:
+        rewritten_a = _split_sqrt_of_positive_rational_quotient(a)
+        rewritten_b = _split_sqrt_of_positive_rational_quotient(b)
+        if (rewritten_a != a or rewritten_b != b) and _difference_is_zero(
+            rewritten_a, rewritten_b
+        ):
             return True
     except Exception:
         pass

@@ -950,6 +950,34 @@ def test_float_precision(gold, pred, expected):
 def test_sqrt_precision(gold, pred, expected):
     assert compare_strings(gold, pred, match_types=["latex", "expr"], precision=5) == expected
 
+
+# https://github.com/huggingface/Math-Verify/issues/64
+@pytest.mark.parametrize(
+    "gold, pred, expected",
+    [
+        (r"$\sqrt{1/n}$", r"$\frac{1}{\sqrt{n}}$", True),
+        (r"$\sqrt{4/n}$", r"$\frac{2}{\sqrt{n}}$", True),
+        (r"$\sqrt{1/(n+1)}$", r"$\frac{1}{\sqrt{n+1}}$", True),
+        (r"$\sqrt{1/n}$", r"$\sqrt{n}$", False),
+        (r"$\sqrt{1/n}$", r"$\frac{1}{n}$", False),
+        (r"$\sqrt{4/n}$", r"$\frac{2}{\sqrt{m}}$", False),
+        (r"$\sqrt{x^2}$", r"$x$", False),
+        (r"$\sqrt{x^2}$", r"$|x|$", True),
+        (r"$\sqrt{1/n^2}$", r"$\frac{1}{|n|}$", True),
+        (r"$\sqrt{1/n^2}$", r"$\frac{1}{n}$", False),
+        (r"$\sqrt{-4/n}$", r"$\frac{2}{\sqrt{-n}}$", False),
+    ],
+)
+def test_sqrt_of_positive_rational_quotient(gold, pred, expected):
+    assert (
+        verify(
+            parse(gold, parsing_timeout=None),
+            parse(pred, parsing_timeout=None),
+            timeout_seconds=None,
+        )
+        == expected
+    )
+
 # https://github.com/huggingface/Math-Verify/issues/37
 @pytest.mark.parametrize(
     "gold, pred, expected",
