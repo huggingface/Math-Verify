@@ -262,7 +262,15 @@ def make_latex_env_pattern(
     inline_content_parenthesis = r"(?:[^\\\n]|\\(?!\)))"
     inline_content_bracket = r"[^\n\]\[]"
 
+    # Display environments can span lines, so in the boxed context an unclosed `$$` or `\[`
+    # followed by many \boxed{} backtracks super-linearly. These lookaheads check that the
+    # closing delimiter exists before trying the boxed match, without changing what matches.
+    display_dollar_guard = ""
+    display_bracket_guard = ""
+
     if context == "boxed":
+        display_dollar_guard = rf"(?={display_dollar_content}*(?<!\\)\$\$)"
+        display_bracket_guard = rf"(?={display_content_bracket}*(?<!\\)\\\])"
         # Rewrite patterns to optionally include boxed content
         display_dollar_content = rf"{display_dollar_content}*?\\boxed{{{display_dollar_content}+?}}{display_dollar_content}*?"
         display_content_bracket = rf"{display_content_bracket}*?\\boxed{{{display_content_bracket}+?}}{display_content_bracket}*?"
@@ -279,8 +287,8 @@ def make_latex_env_pattern(
     # Build list of regex patterns
     patterns = [
         # Display math environments (allow multiline)
-        rf"(?<!\\)\$\$(?P<{prefix}latexDisplayDollar>{display_dollar_content})(?<!\\)\$\$",
-        rf"(?<!\\)\\\[(?P<{prefix}latexDisplayBracket>{display_content_bracket})(?<!\\)\\\]",
+        rf"(?<!\\)\$\${display_dollar_guard}(?P<{prefix}latexDisplayDollar>{display_dollar_content})(?<!\\)\$\$",
+        rf"(?<!\\)\\\[{display_bracket_guard}(?P<{prefix}latexDisplayBracket>{display_content_bracket})(?<!\\)\\\]",
         # Inline math environments (single line only)
         rf"(?<!\\|\d)\$(?P<{prefix}latexInlineDollar>{inline_dollar_content})(?<!\\)\$",
         rf"(?<!\\)\\\((?P<{prefix}latexInlineParenthesis>{inline_content_parenthesis})(?<!\\)\\\)",
