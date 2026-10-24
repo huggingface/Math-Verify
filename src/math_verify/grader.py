@@ -39,6 +39,7 @@ from sympy import (
     MatrixBase,
     MatrixExpr,
     Mul,
+    Ne,
     Number,
     Integer,
     Rational,
@@ -73,6 +74,7 @@ INVERSE_RELATIONS = {
     StrictGreaterThan: StrictLessThan,
     StrictLessThan: StrictGreaterThan,
     Eq: Eq,
+    Ne: Ne,
 }
 
 
