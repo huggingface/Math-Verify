@@ -324,10 +324,32 @@ def sympy_compare_relational(
     """
 
     if isinstance(gold, And) and isinstance(pred, And):
-        return all(
-            sympy_compare_relational(g, p, float_rounding, numeric_precision)
-            for g, p in zip(gold._unsorted_args, pred._unsorted_args, strict=True)
-        )
+        gold_args = list(gold._unsorted_args)
+        pred_args = list(pred._unsorted_args)
+        # Different lengths are different answers. A strict zip would raise.
+        if len(gold_args) != len(pred_args):
+            return False
+        remaining = pred_args[:]
+        for part in gold_args:
+            for index, other in enumerate(remaining):
+                if sympy_compare_relational(
+                    part, other, float_rounding, numeric_precision
+                ):
+                    remaining.pop(index)
+                    break
+            else:
+                break
+        else:
+            return True
+        # x=y=1 and y=x=1 split into different pairs, but the same solution.
+        if all(isinstance(arg, Eq) for arg in gold_args + pred_args):
+            try:
+                gold_solutions = solve(gold_args, dict=True)
+                pred_solutions = solve(pred_args, dict=True)
+            except Exception:
+                return False
+            return bool(gold_solutions) and gold_solutions == pred_solutions
+        return False
 
     elif not isinstance(gold, Relational) or not isinstance(pred, Relational):
         return False
@@ -647,6 +669,18 @@ def sympy_expr_eq(
     # But if one is assignment and other is equation, we want to unwrap both
 
     # We always want to truncate if it's assignment, assignment
+
+    # Compare full equation chains before assignment truncation. Truncation keeps
+    # only the first symbol and the last value, so x=y=1 and y=x=1 become x=1
+    # and y=1.
+    if (
+        isinstance(gold, And)
+        and isinstance(pred, And)
+        and is_equation(gold)
+        and is_equation(pred)
+        and sympy_compare_relational(gold, pred, float_rounding, numeric_precision)
+    ):
+        return True
 
     is_gold_assignment = is_assignment_relation(gold)
     is_pred_assignment = is_assignment_relation(pred)
