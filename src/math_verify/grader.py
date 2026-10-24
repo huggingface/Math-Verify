@@ -324,6 +324,9 @@ def sympy_compare_relational(
     """
 
     if isinstance(gold, And) and isinstance(pred, And):
+        # Different lengths are different answers. strict zip would raise.
+        if len(gold._unsorted_args) != len(pred._unsorted_args):
+            return False
         return all(
             sympy_compare_relational(g, p, float_rounding, numeric_precision)
             for g, p in zip(gold._unsorted_args, pred._unsorted_args, strict=True)
