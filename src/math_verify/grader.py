@@ -34,26 +34,26 @@ from sympy import (
     Eq,
     Float,
     GreaterThan,
+    Integer,
     Interval,
     LessThan,
     MatrixBase,
     MatrixExpr,
     Mul,
     Number,
-    Integer,
     Rational,
     Set,
     StrictGreaterThan,
     StrictLessThan,
     Symbol,
     Tuple,
+    UnevaluatedExpr,
     default_sort_key,
     nan,
     ordered,
     simplify,
     solve,
     zoo,
-    UnevaluatedExpr,
 )
 from sympy import FiniteSet as SympyFiniteSet
 from sympy.core.function import UndefinedFunction
@@ -97,9 +97,14 @@ def safe_sympy_doit(a: Basic | MatrixBase):
 
 
 def get_pct_val(expr, default=None):
-    if isinstance(expr, Mul) and len(expr.args) == 2 and expr.args[1] == UnevaluatedExpr(Rational(1, 100)):
+    if (
+        isinstance(expr, Mul)
+        and len(expr.args) == 2
+        and expr.args[1] == UnevaluatedExpr(Rational(1, 100))
+    ):
         return expr.args[0]
     return default
+
 
 def is_atomic_or_pct_atomic(expr: Basic | MatrixBase, atomic_type: type) -> bool:
     """Check if expression is either an atomic type or percentage atomic type.
@@ -167,7 +172,9 @@ def sympy_numeric_eq(
             except Exception:
                 pass
         # If it's 9% == 9, we can use integer comparison
-        elif is_atomic_or_pct_atomic(a, Integer) and is_atomic_or_pct_atomic(b, Integer):
+        elif is_atomic_or_pct_atomic(a, Integer) and is_atomic_or_pct_atomic(
+            b, Integer
+        ):
             a = get_pct_val(a, a)
             b = get_pct_val(b, b)
             return a == b
@@ -210,11 +217,13 @@ def unwrap_eq(s):
         return take_last_relation(s).rhs
     return s
 
+
 def sort_key(x):
     try:
         return default_sort_key(unwrap_eq(x).evalf())
     except Exception:
         return default_sort_key(unwrap_eq(x))
+
 
 def sympy_deep_compare_set_and_tuple(
     gold: SympyFiniteSet | Tuple,
@@ -286,21 +295,39 @@ def sympy_compare_interval(
 def sympy_solve_and_compare(
     gold: Relational, pred: Relational, float_rounding: int, numeric_precision: int
 ) -> bool:
-    solved_gold = list(ordered(solve(gold, gold.free_symbols)))
-    solved_pred = list(ordered(solve(pred, pred.free_symbols)))
     # Equalities should return list of dicts of solutions
     if isinstance(gold, Eq) and isinstance(pred, Eq):
+        solved_gold = list(
+            ordered(solve(gold, tuple(ordered(gold.free_symbols)), dict=True))
+        )
+        solved_pred = list(
+            ordered(solve(pred, tuple(ordered(pred.free_symbols)), dict=True))
+        )
+        if not solved_gold or not solved_pred:
+            return False
+        if len(solved_gold) != len(solved_pred):
+            return False
         return all(
             all(
                 g_k == p_k
                 and sympy_expr_eq(g_v, p_v, float_rounding, numeric_precision)
                 for (g_k, g_v), (p_k, p_v) in zip(
-                    sorted(g.items()), sorted(p.items()), strict=True
+                    sorted(g.items(), key=lambda item: default_sort_key(item[0])),
+                    sorted(p.items(), key=lambda item: default_sort_key(item[0])),
+                    strict=True,
                 )
             )
-            for g, p in zip(ordered(solved_gold, keys=sort_key, default=False), ordered(solved_pred, keys=sort_key, default=False), strict=True)
+            for g, p in zip(
+                ordered(solved_gold, keys=sort_key, default=False),
+                ordered(solved_pred, keys=sort_key, default=False),
+                strict=True,
+            )
         )
     else:
+        solved_gold = list(ordered(solve(gold, gold.free_symbols)))
+        solved_pred = list(ordered(solve(pred, pred.free_symbols)))
+        if not solved_gold or not solved_pred:
+            return False
         return sympy_expr_eq(
             solved_gold, solved_pred, float_rounding, numeric_precision
         )
@@ -331,6 +358,38 @@ def sympy_compare_relational(
 
     elif not isinstance(gold, Relational) or not isinstance(pred, Relational):
         return False
+
+    # If both relations have constant numerical differences (i.e. lhs - rhs is a number),
+    # comparing differences (e.g. 3 - 4 == 1 - 2) would falsely treat unrelated
+    # numerical relations as equal. In that case, compare lhs and rhs directly or inverted.
+    try:
+        gold_diff = gold.lhs - gold.rhs
+        pred_diff = pred.lhs - pred.rhs
+        if (
+            hasattr(gold_diff, "is_number")
+            and gold_diff.is_number
+            or hasattr(pred_diff, "is_number")
+            and pred_diff.is_number
+        ):
+            if type(gold) is type(pred) and (
+                sympy_expr_eq(gold.lhs, pred.lhs, float_rounding, numeric_precision)
+                and sympy_expr_eq(gold.rhs, pred.rhs, float_rounding, numeric_precision)
+            ):
+                return True
+            if (
+                type(gold) in INVERSE_RELATIONS
+                and INVERSE_RELATIONS[type(gold)] is type(pred)
+                and (
+                    sympy_expr_eq(gold.lhs, pred.rhs, float_rounding, numeric_precision)
+                    and sympy_expr_eq(
+                        gold.rhs, pred.lhs, float_rounding, numeric_precision
+                    )
+                )
+            ):
+                return True
+            return False
+    except Exception:
+        pass
 
     # Helper to check if expressions are equivalent when flipped
     def are_flipped_inequalities_equal(a: Relational, b: Relational) -> bool:
@@ -637,9 +696,7 @@ def sympy_expr_eq(
             gold_variables = gold.free_symbols
             pred_variables = pred.free_symbols
             if len(gold_variables) == len(pred_variables):
-                pred = pred.subs(
-                    list(zip(pred_variables, gold_variables, strict=True))
-                )
+                pred = pred.subs(list(zip(pred_variables, gold_variables, strict=True)))
         except Exception:
             pass
 
@@ -832,7 +889,12 @@ def verify(
             target, (Basic, MatrixBase)
         ):
             return sympy_expr_eq(
-                gold, target, float_rounding, numeric_precision, allow_set_relation_comp, strict
+                gold,
+                target,
+                float_rounding,
+                numeric_precision,
+                allow_set_relation_comp,
+                strict,
             )
 
         # We don't support str / sympy.Expr comparison. Imo there is no point in doing this, as chances
