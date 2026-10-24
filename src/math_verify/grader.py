@@ -29,6 +29,7 @@ from latex2sympy2_extended import is_expr_of_only_symbols
 from latex2sympy2_extended.logic import And
 from latex2sympy2_extended.sets import FiniteSet
 from sympy import (
+    Abs,
     Basic,
     E,
     Eq,
@@ -306,6 +307,83 @@ def sympy_solve_and_compare(
         )
 
 
+def _is_nonnegative_real_number(expr: Basic) -> bool:
+    if not getattr(expr, "is_number", False) or not getattr(expr, "is_real", False):
+        return False
+    if expr.free_symbols:
+        return False
+    try:
+        return bool(expr >= 0)
+    except Exception:
+        return False
+
+
+def _rewrite_absolute_inequality(expr: Basic):
+    """Rewrite an absolute-value inequality whose bound is a nonnegative number.
+
+    |e| < c and |e| <= c become the interval -c < e < c. |e| > c and |e| >= c
+    become the pair e > c, e < -c. Other relations are left unchanged.
+    """
+    if not isinstance(expr, Relational) or isinstance(expr, Eq):
+        return None
+
+    relation = type(expr)
+    if isinstance(expr.lhs, Abs) and _is_nonnegative_real_number(expr.rhs):
+        inside, bound = expr.lhs.args[0], expr.rhs
+    elif isinstance(expr.rhs, Abs) and _is_nonnegative_real_number(expr.lhs):
+        inside, bound = expr.rhs.args[0], expr.lhs
+        relation = INVERSE_RELATIONS[relation]
+    else:
+        return None
+
+    if relation in (StrictLessThan, LessThan):
+        return And(
+            relation(-bound, inside, evaluate=False),
+            relation(inside, bound, evaluate=False),
+            evaluate=False,
+        )
+    if relation in (StrictGreaterThan, GreaterThan):
+        lower = StrictLessThan if relation is StrictGreaterThan else LessThan
+        return (
+            relation(inside, bound, evaluate=False),
+            lower(inside, -bound, evaluate=False),
+        )
+    return None
+
+
+def _match_relation_parts(
+    gold_parts, pred_parts, float_rounding, numeric_precision
+) -> bool:
+    if len(gold_parts) != len(pred_parts):
+        return False
+    remaining = list(pred_parts)
+    for part in gold_parts:
+        for index, other in enumerate(remaining):
+            if sympy_compare_relational(part, other, float_rounding, numeric_precision):
+                remaining.pop(index)
+                break
+        else:
+            return False
+    return True
+
+
+def _absolute_inequalities_match(gold, pred, float_rounding, numeric_precision) -> bool:
+    def parts(expr):
+        if isinstance(expr, And):
+            return list(expr._unsorted_args)
+        if isinstance(expr, tuple):
+            return list(expr)
+        return None
+
+    gold_parts = parts(gold)
+    pred_parts = parts(pred)
+    if gold_parts is None or pred_parts is None:
+        return False
+    return _match_relation_parts(
+        gold_parts, pred_parts, float_rounding, numeric_precision
+    )
+
+
 def sympy_compare_relational(
     gold: Relational | And,
     pred: Relational | And,
@@ -322,6 +400,16 @@ def sympy_compare_relational(
     Returns:
         True if relations are equivalent, False otherwise
     """
+
+    rewritten_gold = _rewrite_absolute_inequality(gold)
+    rewritten_pred = _rewrite_absolute_inequality(pred)
+    if rewritten_gold is not None or rewritten_pred is not None:
+        return _absolute_inequalities_match(
+            gold if rewritten_gold is None else rewritten_gold,
+            pred if rewritten_pred is None else rewritten_pred,
+            float_rounding,
+            numeric_precision,
+        )
 
     if isinstance(gold, And) and isinstance(pred, And):
         return all(
