@@ -188,9 +188,11 @@ def lazy_expr_regex(
     operators = [r"\+", r"\-", r"\*", r"\×", r"\/", r"\^", r"\(", r"\)", r"\÷"]
     operators_re = "".join(operators)
     all_expr_chars = r"[\d\.\s" + operators_re + r"]"
-    # Expression should have at minimum at least one operator and must start with a digit
+    # Expression should have at minimum at least one operator, must start with a digit
+    # and end with a digit or closing parenthesis, so that Markdown bold around an answer
+    # (`**129**`) is not read as the expression `129**`
     expr_re = (
-        rf"(?P<expr>-?\(?-?\d{all_expr_chars}*[{operators_re}]{all_expr_chars}+\)?)"
+        rf"(?P<expr>-?\(?-?\d{all_expr_chars}*[{operators_re}]{all_expr_chars}*[\d\)])"
     )
 
     # Punctuation regexes
