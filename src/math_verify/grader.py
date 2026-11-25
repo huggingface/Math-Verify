@@ -701,10 +701,12 @@ def sympy_expr_eq(
         return sympy_compare_sets(gold, pred, float_rounding, numeric_precision)
 
     # Handles $\text{answer}$ == $answer$, one is symbol, is multiplication of symbols (a*n*s*w*e*r)
-    elif isinstance(gold, Symbol) or isinstance(pred, Symbol):
-        return sympy_compare_symbols(gold, pred)
+    if (
+        isinstance(gold, Symbol) or isinstance(pred, Symbol)
+    ) and sympy_compare_symbols(gold, pred):
+        return True
 
-    elif isinstance(gold, (Basic, MatrixBase)) and isinstance(
+    if isinstance(gold, (Basic, MatrixBase)) and isinstance(
         pred, (Basic, MatrixBase)
     ):
         # Mostly so that 0.333333 = 1/3
